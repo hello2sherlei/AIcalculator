@@ -5,6 +5,7 @@ const fs = require('fs');
 let mainWindow = null;
 let settingsWindow = null;
 let tray = null;
+let timerInterval = null; // 主进程计时器
 const DATA_FILE = path.join(app.getPath('userData'), 'data.json');
 
 // 默认数据
@@ -112,31 +113,19 @@ function saveData(data) {
 function createClockIcon() {
   const { nativeImage } = require('electron');
 
-  // 创建SVG时钟图标（适合macOS菜单栏的Template Image风格）
-  const svg = `
-    <svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
-      <!-- 外圆 -->
-      <circle cx="11" cy="11" r="9" fill="none" stroke="black" stroke-width="1.5"/>
+  // 使用PNG格式的base64编码图标（22x22像素的简洁时钟图标）
+  // 这是一个黑色的时钟图标，适合macOS Template Image
+  const base64Icon = 'iVBORw0KGgoAAAANSUhEUgAAABYAAAAWCAYAAADEtGw7AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAALEgAACxIB0t1+/AAAABR0RVh0Q3JlYXRpb24gVGltZQAxMS81LzI1GMZM2QAAAB10RVh0U29mdHdhcmUAQWRvYmUgRmlyZXdvcmtzIENTNui8sowAAAFlSURBVEiJ7ZTPSsNAEMZ/k6YNgohF8OBJ8OJT+AQ+gk/gA/gAPoBXL/oIXhQPgoh4qCAIFqEqVGt3x0NSE5JNs/VQ/GDJZnf2m29nZ2eU1ppzopxz8j/xPU8cx8RxjFKKIAiYTCZN0JMCjBgjh8MBgNVqxWQyYTgcAnBVwFEU4TgOvu9TJhVvFX0cx6zXa8qiZJRSGGNwHOcsZd8VRxH7/R5jDJ7nsdvtAEjTlCRJfjU+Sdd1qdfrGGPodrsA9Pt9Go1GBauUqoS9EWazGUmSlIpPDqeWb7dblFK0222UUrTbbTzPK7gG1oUCLYxarbYHqoO01ux2O5IkodvtYq3FWnt0v91uGY/HPDw8APQK8UEulO/3+7iuu9/tdqJpmsI0TWGaZi0IAjkYDBZCCCmEkEIImSRJxSxdG5afUwBWnuf5f8WyHCvG1lrRarVYLBYV74/6/Bj6AtpD15wy6mhrAAAAAElFTkSuQmCC';
 
-      <!-- 时针 -->
-      <line x1="11" y1="11" x2="11" y2="6" stroke="black" stroke-width="1.5" stroke-linecap="round"/>
-
-      <!-- 分针 -->
-      <line x1="11" y1="11" x2="15" y2="11" stroke="black" stroke-width="1.2" stroke-linecap="round"/>
-
-      <!-- 中心点 -->
-      <circle cx="11" cy="11" r="1.5" fill="black"/>
-    </svg>
-  `;
-
-  // 转换SVG为DataURL并创建NativeImage
-  const dataURL = 'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64');
-  const icon = nativeImage.createFromDataURL(dataURL);
+  const icon = nativeImage.createFromBuffer(Buffer.from(base64Icon, 'base64'));
 
   // 在macOS上，设置为Template Image以支持深色模式
   if (process.platform === 'darwin') {
     icon.setTemplateImage(true);
   }
+
+  console.log('✓ 创建内置时钟图标:', icon.isEmpty() ? '失败（图标为空）' : '成功');
+  console.log('  图标尺寸:', icon.getSize());
 
   return icon;
 }
@@ -303,6 +292,57 @@ function createMainWindow() {
   });
 }
 
+// 启动主进程计时器（确保后台持续计时）
+function startMainTimer() {
+  // 清除现有计时器
+  if (timerInterval) {
+    clearInterval(timerInterval);
+  }
+
+  // 每秒更新一次计时
+  timerInterval = setInterval(() => {
+    const data = loadData();
+    let hasChanges = false;
+
+    // 更新所有正在运行的工具
+    data.tools.forEach(tool => {
+      if (tool.isRunning && tool.remainingSeconds > 0) {
+        tool.remainingSeconds = Math.max(0, tool.remainingSeconds - 1);
+        tool.dailyUsedSeconds += 1;
+        tool.weeklyUsedSeconds += 1;
+        hasChanges = true;
+
+        // 如果时间到了，自动暂停
+        if (tool.remainingSeconds <= 0) {
+          tool.isRunning = false;
+          console.log(`⏰ ${tool.name} 已完成今日目标！`);
+        }
+      }
+    });
+
+    // 如果有变化，保存数据并通知渲染进程
+    if (hasChanges) {
+      saveData(data);
+
+      // 通知渲染进程更新UI
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('timer-update', data);
+      }
+    }
+  }, 1000);
+
+  console.log('✓ 主进程计时器已启动（后台持续运行）');
+}
+
+// 停止主进程计时器
+function stopMainTimer() {
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+    console.log('✓ 主进程计时器已停止');
+  }
+}
+
 function createSettingsWindow() {
   if (settingsWindow) {
     settingsWindow.focus();
@@ -333,6 +373,7 @@ function createSettingsWindow() {
 app.whenReady().then(() => {
   createMainWindow();
   createTray();
+  startMainTimer(); // 启动主进程计时器
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -349,6 +390,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
+  stopMainTimer(); // 停止主进程计时器
 });
 
 // IPC 事件处理

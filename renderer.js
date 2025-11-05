@@ -189,11 +189,8 @@ function openSettings() {
 async function init() {
   await loadData();
 
-  // 每秒更新计时器
-  updateInterval = setInterval(updateTimers, 1000);
-
-  // 每秒保存数据
-  saveInterval = setInterval(saveData, 1000);
+  // 注意：计时逻辑已移到主进程，确保后台持续运行
+  // 渲染进程只负责UI更新
 
   // 绑定头部按钮
   document.getElementById('settingsBtn').onclick = openSettings;
@@ -203,6 +200,13 @@ async function init() {
   };
 }
 
+// 监听来自主进程的计时器更新
+ipcRenderer.on('timer-update', (event, data) => {
+  appData = data;
+  renderToolsList();
+  updateStats();
+});
+
 // 监听来自设置窗口的更新
 ipcRenderer.on('data-updated', async () => {
   await loadData();
@@ -211,9 +215,9 @@ ipcRenderer.on('data-updated', async () => {
 // 页面加载完成后初始化
 window.addEventListener('DOMContentLoaded', init);
 
-// 页面卸载时清理
+// 页面卸载时保存数据
 window.addEventListener('beforeunload', () => {
+  // 清理不再需要的定时器
   if (updateInterval) clearInterval(updateInterval);
   if (saveInterval) clearInterval(saveInterval);
-  saveData();
 });
