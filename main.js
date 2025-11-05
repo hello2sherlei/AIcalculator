@@ -108,6 +108,41 @@ function saveData(data) {
   }
 }
 
+// 更新托盘菜单
+function updateTrayMenu() {
+  if (!tray || !mainWindow) return;
+
+  const isVisible = mainWindow.isVisible();
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: isVisible ? '隐藏窗口' : '显示窗口',
+      click: () => {
+        if (mainWindow) {
+          if (mainWindow.isVisible()) {
+            mainWindow.hide();
+          } else {
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        }
+      }
+    },
+    {
+      type: 'separator'
+    },
+    {
+      label: '退出',
+      click: () => {
+        app.isQuitting = true;
+        app.quit();
+      }
+    }
+  ]);
+
+  tray.setContextMenu(contextMenu);
+}
+
 // 创建系统托盘
 function createTray() {
   // 尝试加载图标，如果不存在则创建一个临时的
@@ -128,36 +163,23 @@ function createTray() {
     tray = new Tray(iconPath);
   }
 
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: '显示窗口',
-      click: () => {
-        if (mainWindow) {
-          mainWindow.show();
-        }
-      }
-    },
-    {
-      label: '退出',
-      click: () => {
-        app.isQuitting = true;
-        app.quit();
-      }
-    }
-  ]);
-
   tray.setToolTip('AI Time Tracker');
-  tray.setContextMenu(contextMenu);
 
+  // 左键点击切换显示/隐藏
   tray.on('click', () => {
     if (mainWindow) {
       if (mainWindow.isVisible()) {
         mainWindow.hide();
       } else {
         mainWindow.show();
+        mainWindow.focus();
       }
+      updateTrayMenu();
     }
   });
+
+  // 初始化菜单
+  updateTrayMenu();
 }
 
 function createMainWindow() {
@@ -185,7 +207,7 @@ function createMainWindow() {
     transparent: true,
     alwaysOnTop: true,
     resizable: false,
-    skipTaskbar: false,
+    skipTaskbar: true, // 在Windows任务栏和macOS Dock中隐藏
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
@@ -201,11 +223,28 @@ function createMainWindow() {
     if (!app.isQuitting) {
       event.preventDefault();
       mainWindow.hide();
+      updateTrayMenu();
     }
   });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  // 最小化时隐藏到托盘
+  mainWindow.on('minimize', (event) => {
+    event.preventDefault();
+    mainWindow.hide();
+    updateTrayMenu();
+  });
+
+  // 窗口显示/隐藏时更新托盘菜单
+  mainWindow.on('show', () => {
+    updateTrayMenu();
+  });
+
+  mainWindow.on('hide', () => {
+    updateTrayMenu();
   });
 
   // 保存窗口位置
@@ -300,12 +339,6 @@ ipcMain.handle('set-auto-launch', (event, enabled) => {
 
 ipcMain.handle('get-auto-launch', () => {
   return app.getLoginItemSettings().openAtLogin;
-});
-
-ipcMain.handle('minimize-window', () => {
-  if (mainWindow) {
-    mainWindow.minimize();
-  }
 });
 
 ipcMain.handle('hide-window', () => {

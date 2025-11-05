@@ -198,10 +198,6 @@ async function init() {
   // 绑定头部按钮
   document.getElementById('settingsBtn').onclick = openSettings;
 
-  document.getElementById('minimizeBtn').onclick = async () => {
-    await ipcRenderer.invoke('minimize-window');
-  };
-
   document.getElementById('closeBtn').onclick = async () => {
     await ipcRenderer.invoke('hide-window');
   };
