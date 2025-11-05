@@ -108,6 +108,39 @@ function saveData(data) {
   }
 }
 
+// 创建内置时钟图标（白色线条圆表盘）
+function createClockIcon() {
+  const { nativeImage } = require('electron');
+
+  // 创建SVG时钟图标（适合macOS菜单栏的Template Image风格）
+  const svg = `
+    <svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
+      <!-- 外圆 -->
+      <circle cx="11" cy="11" r="9" fill="none" stroke="black" stroke-width="1.5"/>
+
+      <!-- 时针 -->
+      <line x1="11" y1="11" x2="11" y2="6" stroke="black" stroke-width="1.5" stroke-linecap="round"/>
+
+      <!-- 分针 -->
+      <line x1="11" y1="11" x2="15" y2="11" stroke="black" stroke-width="1.2" stroke-linecap="round"/>
+
+      <!-- 中心点 -->
+      <circle cx="11" cy="11" r="1.5" fill="black"/>
+    </svg>
+  `;
+
+  // 转换SVG为DataURL并创建NativeImage
+  const dataURL = 'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64');
+  const icon = nativeImage.createFromDataURL(dataURL);
+
+  // 在macOS上，设置为Template Image以支持深色模式
+  if (process.platform === 'darwin') {
+    icon.setTemplateImage(true);
+  }
+
+  return icon;
+}
+
 // 更新托盘菜单
 function updateTrayMenu() {
   if (!tray || !mainWindow) return;
@@ -145,41 +178,55 @@ function updateTrayMenu() {
 
 // 创建系统托盘
 function createTray() {
-  // 尝试加载图标，如果不存在则创建一个临时的
-  let iconPath = path.join(__dirname, 'icon.png');
+  let icon;
 
-  // 检查图标是否存在，不存在则尝试使用nativeImage创建
-  if (!fs.existsSync(iconPath)) {
+  // 优先加载项目根目录的 icon.png
+  const iconPath = path.join(__dirname, 'icon.png');
+
+  if (fs.existsSync(iconPath)) {
+    // 使用自定义图标
     const { nativeImage } = require('electron');
-    // 创建一个简单的空图标
-    const icon = nativeImage.createEmpty();
-    try {
-      tray = new Tray(icon);
-    } catch (error) {
-      console.warn('无法创建托盘图标:', error);
-      return;
+    icon = nativeImage.createFromPath(iconPath);
+
+    // 在macOS上，如果是单色图标，设置为Template Image
+    if (process.platform === 'darwin') {
+      // 可以调整图标大小以适配菜单栏
+      icon = icon.resize({ width: 22, height: 22 });
+      icon.setTemplateImage(true);
     }
+
+    console.log('✓ 已加载自定义图标: icon.png');
   } else {
-    tray = new Tray(iconPath);
+    // 使用内置时钟图标
+    icon = createClockIcon();
+    console.log('ℹ icon.png 不存在，使用内置时钟图标');
   }
 
-  tray.setToolTip('AI Time Tracker');
+  // 创建托盘
+  try {
+    tray = new Tray(icon);
+    tray.setToolTip('AI Time Tracker');
 
-  // 左键点击切换显示/隐藏
-  tray.on('click', () => {
-    if (mainWindow) {
-      if (mainWindow.isVisible()) {
-        mainWindow.hide();
-      } else {
-        mainWindow.show();
-        mainWindow.focus();
+    // 左键点击切换显示/隐藏
+    tray.on('click', () => {
+      if (mainWindow) {
+        if (mainWindow.isVisible()) {
+          mainWindow.hide();
+        } else {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+        updateTrayMenu();
       }
-      updateTrayMenu();
-    }
-  });
+    });
 
-  // 初始化菜单
-  updateTrayMenu();
+    // 初始化菜单
+    updateTrayMenu();
+
+    console.log('✓ 托盘图标创建成功');
+  } catch (error) {
+    console.error('✗ 无法创建托盘图标:', error);
+  }
 }
 
 function createMainWindow() {
